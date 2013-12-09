@@ -1,6 +1,6 @@
 /*
  * Sonar CAS Plugin
- * Copyright (C) 2012 SonarSource
+ * Copyright (C) 2013 SonarSource
  * dev@sonar.codehaus.org
  *
  * This program is free software; you can redistribute it and/or
@@ -19,21 +19,121 @@
  */
 package org.sonar.plugins.cas;
 
+import java.util.Map;
+
+import javax.annotation.Nullable;
+import javax.naming.NamingException;
+import javax.naming.directory.Attribute;
+import javax.naming.directory.Attributes;
+import javax.naming.directory.SearchResult;
+
 import org.jasig.cas.client.util.AbstractCasFilter;
 import org.jasig.cas.client.validation.Assertion;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.sonar.api.security.ExternalUsersProvider;
 import org.sonar.api.security.UserDetails;
+import org.sonar.api.utils.SonarException;
+import org.sonar.plugins.ldap.LdapContextFactory;
+import org.sonar.plugins.ldap.LdapUserMapping;
+import org.sonar.plugins.ldap.LdapUsersProvider;
 
 public class CasUserProvider extends ExternalUsersProvider {
 
-  @Override
-  public UserDetails doGetUserDetails(Context context) {
-    UserDetails user = null;
-    Assertion assertion = (Assertion) context.getRequest().getAttribute(AbstractCasFilter.CONST_CAS_ASSERTION);
-    if (assertion!=null && assertion.getPrincipal()!=null) {
-      user = new UserDetails();
-      user.setName(assertion.getPrincipal().getName());
-    }
-    return user;
-  }
+	  private static final Logger LOG = LoggerFactory.getLogger(LdapUsersProvider.class);
+	  private final Map<String, LdapContextFactory> contextFactories;
+	  private final Map<String, LdapUserMapping> userMappings;
+
+	  public CasUserProvider(Map<String, LdapContextFactory> contextFactories, Map<String, LdapUserMapping> userMappings) {
+	    this.contextFactories = contextFactories;
+	    this.userMappings = userMappings;
+	  }
+
+	  private static String getAttributeValue(@Nullable Attribute attribute) throws NamingException {
+	    if (attribute == null) {
+	      return "";
+	    }
+	    return (String) attribute.get();
+	  }
+
+	  @Override
+	  public UserDetails doGetUserDetails(Context context) {
+	    UserDetails user = null;
+	    Assertion assertion = (Assertion) context.getRequest().getAttribute(AbstractCasFilter.CONST_CAS_ASSERTION);
+	    if (assertion!=null && assertion.getPrincipal()!=null) {
+	      try{
+	        user = doGetUserDetails(assertion.getPrincipal().getName());
+	      } catch(SonarException e){
+	        user = new UserDetails();
+	        user.setName(assertion.getPrincipal().getName());
+	      }
+	    	
+	    }
+	    return user;
+	  }
+	  
+	  /**
+	   * @return details for specified user, or null if such user doesn't exist
+	   * @throws SonarException if unable to retrieve details
+	   */
+	  @Override
+	  public UserDetails doGetUserDetails(String username) {
+	    LOG.debug("Requesting details for user {}", username);
+	    // If there are no userMappings available, we can not retrieve user details.
+	    if (userMappings.isEmpty()) {
+	      String errorMessage = "Unable to retrieve details for user " + username + ": No user mapping found.";
+	      LOG.debug(errorMessage);
+	      throw new SonarException(errorMessage);
+	    }
+	    UserDetails details = null;
+	    SonarException sonarException = null;
+	    for (String serverKey : userMappings.keySet()) {
+	      SearchResult searchResult = null;
+	      try {
+	        searchResult = userMappings.get(serverKey).createSearch(contextFactories.get(serverKey), username)
+	            .returns(userMappings.get(serverKey).getEmailAttribute(), userMappings.get(serverKey).getRealNameAttribute())
+	            .findUnique();
+	      } catch (NamingException e) {
+	        // just in case if Sonar silently swallowed exception
+	        LOG.debug(e.getMessage(), e);
+	        sonarException = new SonarException("Unable to retrieve details for user " + username + " in " + serverKey, e);
+	      }
+	      if (searchResult != null) {
+	        try {
+	          details = mapUserDetails(serverKey, searchResult);
+	          // if no exceptions occur, we found the user and mapped his details.
+	          break;
+	        } catch (NamingException e) {
+	          // just in case if Sonar silently swallowed exception
+	          LOG.debug(e.getMessage(), e);
+	          sonarException = new SonarException("Unable to retrieve details for user " + username + " in " + serverKey, e);
+	        }
+	      } else {
+	        // user not found
+	        LOG.debug("User {} not found in " + serverKey, username);
+	        continue;
+	      }
+	    }
+	    if (details == null && sonarException != null) {
+	      // No user found and there is an exception so there is a reason the user could not be found.
+	      throw sonarException;
+	    }
+	    return details;
+	  }
+
+	  /**
+	   * Map the properties from LDAP to the {@link UserDetails}
+	   *
+	   * @param serverKey the LDAP index so we use the correct {@link LdapUserMapping}
+	   * @return If no exceptions are thrown, a {@link UserDetails} object containing the values from LDAP.
+	   * @throws NamingException In case the communication or mapping to the LDAP server fails.
+	   */
+	  private UserDetails mapUserDetails(String serverKey, SearchResult searchResult) throws NamingException {
+	    Attributes attributes = searchResult.getAttributes();
+	    UserDetails details;
+	    details = new UserDetails();
+	    details.setName(getAttributeValue(attributes.get(userMappings.get(serverKey).getRealNameAttribute())));
+	    details.setEmail(getAttributeValue(attributes.get(userMappings.get(serverKey).getEmailAttribute())));
+	    return details;
+	  }
 }

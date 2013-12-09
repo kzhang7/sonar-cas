@@ -1,6 +1,6 @@
 /*
  * Sonar CAS Plugin
- * Copyright (C) 2012 SonarSource
+ * Copyright (C) 2013 SonarSource
  * dev@sonar.codehaus.org
  *
  * This program is free software; you can redistribute it and/or
@@ -19,22 +19,65 @@
  */
 package org.sonar.plugins.cas;
 
+import java.util.Map;
+
+import org.sonar.api.config.Settings;
 import org.sonar.api.security.Authenticator;
+import org.sonar.api.security.ExternalGroupsProvider;
 import org.sonar.api.security.ExternalUsersProvider;
 import org.sonar.api.security.SecurityRealm;
+import org.sonar.plugins.ldap.LdapContextFactory;
+import org.sonar.plugins.ldap.LdapGroupMapping;
+import org.sonar.plugins.ldap.LdapGroupsProvider;
+import org.sonar.plugins.ldap.LdapSettingsManager;
+import org.sonar.plugins.ldap.LdapUserMapping;
 
 public class CasSecurityRealm extends SecurityRealm {
 
-  public static final String KEY = "cas";
+  private CasUserProvider usersProvider;
+  private LdapGroupsProvider groupsProvider;
+  private CasAuthenticator authenticator;
+  private final LdapSettingsManager settingsManager;
+  public static final String KEY = "CAS";
 
+  public CasSecurityRealm(Settings settings) {
+    settingsManager = new LdapSettingsManager(settings);
+  }
+  
+  /**
+   * Initializes LDAP realm and tests connection.
+   *
+   * @throws org.sonar.api.utils.SonarException if a NamingException was thrown during test
+   */
+  @Override
+  public void init() {
+
+    Map<String, LdapContextFactory> contextFactories = settingsManager.getContextFactories();
+    Map<String, LdapUserMapping> userMappings = settingsManager.getUserMappings();
+    usersProvider = new CasUserProvider(contextFactories, userMappings);
+    authenticator = new CasAuthenticator();
+    Map<String, LdapGroupMapping> groupMappings = settingsManager.getGroupMappings();
+    if (!groupMappings.isEmpty()) {
+      groupsProvider = new LdapGroupsProvider(contextFactories, userMappings, groupMappings);
+    }
+    for (LdapContextFactory contextFactory : contextFactories.values()) {
+      contextFactory.testConnection();
+    }
+  }
+  
   @Override
   public Authenticator doGetAuthenticator() {
-    return new CasAuthenticator();
+    return authenticator;
   }
 
   @Override
   public ExternalUsersProvider getUsersProvider() {
-    return new CasUserProvider();
+    return usersProvider;
+  }
+
+  @Override
+  public ExternalGroupsProvider getGroupsProvider() {
+    return groupsProvider;
   }
 
   @Override

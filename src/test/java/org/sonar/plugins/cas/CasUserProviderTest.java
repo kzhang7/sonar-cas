@@ -1,6 +1,6 @@
 /*
  * Sonar CAS Plugin
- * Copyright (C) 2012 SonarSource
+ * Copyright (C) 2013 SonarSource
  * dev@sonar.codehaus.org
  *
  * This program is free software; you can redistribute it and/or
@@ -19,23 +19,27 @@
  */
 package org.sonar.plugins.cas;
 
+import static org.fest.assertions.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+import java.util.HashMap;
+
+import javax.servlet.http.HttpServletRequest;
+
 import org.jasig.cas.client.authentication.AttributePrincipalImpl;
 import org.jasig.cas.client.util.AbstractCasFilter;
 import org.jasig.cas.client.validation.Assertion;
 import org.junit.Test;
 import org.sonar.api.security.ExternalUsersProvider;
 import org.sonar.api.security.UserDetails;
-
-import javax.servlet.http.HttpServletRequest;
-
-import static org.fest.assertions.Assertions.assertThat;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
+import org.sonar.plugins.ldap.LdapContextFactory;
+import org.sonar.plugins.ldap.LdapUserMapping;
 
 public class CasUserProviderTest {
   @Test
   public void should_get_username_from_cas_attribute() {
-    CasUserProvider provider = new CasUserProvider();
+    CasUserProvider provider = new CasUserProvider(new HashMap<String, LdapContextFactory>(), new HashMap<String, LdapUserMapping>());
     HttpServletRequest request = mock(HttpServletRequest.class);
     Assertion casAssertion = mock(Assertion.class);
     when(casAssertion.getPrincipal()).thenReturn(new AttributePrincipalImpl("goldorak"));
@@ -49,7 +53,7 @@ public class CasUserProviderTest {
 
   @Test
   public void should_not_return_user_id_missing_cas_attribute() {
-    CasUserProvider provider = new CasUserProvider();
+    CasUserProvider provider = new CasUserProvider(new HashMap<String, LdapContextFactory>(), new HashMap<String, LdapUserMapping>());
     HttpServletRequest request = mock(HttpServletRequest.class);
     when(request.getAttribute(AbstractCasFilter.CONST_CAS_ASSERTION)).thenReturn(null);
 

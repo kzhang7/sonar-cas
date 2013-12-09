@@ -1,6 +1,6 @@
 /*
  * Sonar CAS Plugin
- * Copyright (C) 2012 SonarSource
+ * Copyright (C) 2013 SonarSource
  * dev@sonar.codehaus.org
  *
  * This program is free software; you can redistribute it and/or
@@ -19,17 +19,28 @@
  */
 package org.sonar.plugins.cas;
 
-import org.junit.Test;
-
 import static org.fest.assertions.Assertions.assertThat;
 
+import org.junit.ClassRule;
+import org.junit.Test;
+import org.sonar.api.config.Settings;
+import org.sonar.plugins.ldap.server.LdapServer;
+
 public class CasSecurityRealmTest {
+  
+  @ClassRule
+  public static LdapServer server = new LdapServer("/users.example.org.ldif");
+  
   @Test
   public void should_declare_components() {
-    CasSecurityRealm realm = new CasSecurityRealm();
+    
+    Settings settings = new Settings().setProperty("ldap.url", server.getUrl());
+    
+    CasSecurityRealm realm = new CasSecurityRealm(settings);
+    realm.init();
     assertThat(realm.doGetAuthenticator()).isInstanceOf(CasAuthenticator.class);
     assertThat(realm.getUsersProvider()).isInstanceOf(CasUserProvider.class);
-    assertThat(realm.getName()).isEqualTo("cas");
+    assertThat(realm.getName()).isEqualTo("CAS");
   }
 
 }
